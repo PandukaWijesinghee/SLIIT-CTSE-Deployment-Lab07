@@ -84,27 +84,64 @@
 <body>
   <main class="card">
     <h1>Azure Lab 07 Frontend</h1>
-    <p>Use the button below to call the deployed gateway health endpoint.</p>
+    <p>Use the button below to call the gateway health endpoint through this frontend proxy.</p>
+    <p id="base" class="ok"></p>
     <button id="check">Check Gateway Health</button>
     <pre id="out">Waiting for request...</pre>
     <p class="ok" id="status"></p>
   </main>
 
   <script>
-    const gatewayBase = window.GATEWAY_BASE_URL || "";
+    let gatewayBase = "";
     const output = document.getElementById("out");
     const statusEl = document.getElementById("status");
+    const baseEl = document.getElementById("base");
     const button = document.getElementById("check");
 
+    async function parseJsonSafely(res) {
+      const text = await res.text();
+      try {
+        return { ok: true, value: JSON.parse(text) };
+      } catch (_err) {
+        return { ok: false, value: text };
+      }
+    }
+
+    async function loadConfig() {
+      try {
+        const res = await fetch("/config");
+        const parsed = await parseJsonSafely(res);
+        if (!parsed.ok) {
+          throw new Error("/config did not return JSON");
+        }
+        const cfg = parsed.value;
+        gatewayBase = cfg.gatewayBase || "";
+        if (gatewayBase) {
+          baseEl.textContent = `Gateway base: ${gatewayBase}`;
+        }
+      } catch (_err) {
+        baseEl.textContent = "Gateway base unavailable (run frontend with npm start, not static server)";
+      }
+    }
+
+    loadConfig();
+
     button.addEventListener("click", async () => {
-      const url = gatewayBase ? `${gatewayBase}/health` : "/health";
+      const url = "/health";
       output.textContent = `Calling ${url} ...`;
       statusEl.textContent = "";
 
       try {
         const res = await fetch(url);
-        const body = await res.json();
-        output.textContent = JSON.stringify({ code: res.status, body }, null, 2);
+        const parsed = await parseJsonSafely(res);
+        if (!parsed.ok) {
+          const snippet = parsed.value.slice(0, 180).replace(/\s+/g, " ");
+          output.textContent = `Non-JSON response from ${url} (status ${res.status}).\n` +
+            `This usually means a static server is running instead of the frontend proxy.\n` +
+            `Response preview: ${snippet}`;
+          return;
+        }
+        output.textContent = JSON.stringify({ code: res.status, body: parsed.value }, null, 2);
         if (res.ok) {
           statusEl.textContent = "Gateway is reachable";
         }
